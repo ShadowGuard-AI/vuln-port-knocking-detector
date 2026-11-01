@@ -1,7 +1,6 @@
 import argparse
 import logging
 import socket
-import random
 import time
 import sys
 
@@ -40,6 +39,12 @@ def setup_argparse():
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose output (debug logging)."
+    )
+    parser.add_argument(
+        "--target-port",
+        type=int,
+        default=None,
+        help="The hidden or service port the knock sequence is meant to open. It is checked before and after the sequence, and whether it opened is the reported verdict.",
     )
     return parser
 
@@ -107,22 +112,46 @@ def main():
     logging.info(f"Starting port knocking detection on {host}...")
     logging.debug(f"Target host: {host}, Ports: {ports}, Timeout: {timeout}, Delay: {delay}")
 
+    target_port = args.target_port
+    if target_port is not None and not (1 <= target_port <= 65535):
+        logging.error("Invalid target port. Please provide an integer between 1 and 65535.")
+        sys.exit(1)
+
+    def port_is_open(port):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(timeout)
+                sock.connect((host, port))
+                return True
+        except OSError:
+            return False
+
     try:
-        success = True
+        was_open = port_is_open(target_port) if target_port is not None else None
+        if target_port is not None:
+            logging.info(f"Target port {target_port} before knocking: {'open' if was_open else 'closed'}")
+
+        # A refused or timed out attempt is a delivered knock, not a reason
+        # to stop: knock ports are closed or filtered by design, so every
+        # port in the sequence is always attempted.
         for i, port in enumerate(ports):
             logging.info(f"Knocking on port {port} ({i+1}/{len(ports)})...")
-            if not knock_port(host, port, timeout):
-                success = False
-                logging.warning(f"Failed to connect to port {port}.")
-                break # Stop on first failure for realistic knocking
+            accepted = knock_port(host, port, timeout)
+            logging.info(f"Knock delivered to port {port} ({'connection accepted' if accepted else 'refused or timed out, knock still delivered'}).")
             time.sleep(delay)
 
-        if success:
-            logging.info("Successfully knocked on all ports in sequence.")
-            print("Port knocking sequence successful.  Investigate further for potential vulnerabilities.") # Indicate a potential finding.
+        logging.info(f"Knock sequence delivered to all {len(ports)} ports.")
+        if target_port is not None:
+            is_open = port_is_open(target_port)
+            logging.info(f"Target port {target_port} after knocking: {'open' if is_open else 'closed'}")
+            if is_open and not was_open:
+                print(f"Port knocking detected: target port {target_port} opened after the knock sequence.")
+            elif is_open and was_open:
+                print(f"Target port {target_port} was already open before the knock sequence, so the sequence did not open it.")
+            else:
+                print(f"Target port {target_port} did not open after the knock sequence.")
         else:
-            logging.info("Port knocking sequence failed.")
-            print("Port knocking sequence failed.  No ports opened after knocking sequence.") # Indicate a failed attempt
+            print(f"Knock sequence delivered to all {len(ports)} ports. No target port was supplied with --target-port, so whether a hidden port opened was not checked.")
 
     except KeyboardInterrupt:
         logging.info("Port knocking detection interrupted by user.")
@@ -150,15 +179,9 @@ Usage Examples:
 3. Verbose output for debugging:
    python vuln-Port-Knocking-Detector.py target.example.com --ports 1234 5678 9012 --verbose
 
-Offensive Tool Steps (Illustrative - use with authorization only):
-
-1.  After detecting a successful port knock, attempt to connect to a service on a port that *should* be opened by the knock.
-2.  Send crafted packets to the opened service, attempting to exploit known vulnerabilities for that service version.
-3.  Attempt to retrieve sensitive information from the opened service (e.g., configuration files, database credentials).
-
 Important Considerations:
 
-*   Ensure you have explicit permission to perform port knocking detection and any subsequent exploitation attempts on the target system.
+*   Ensure you have explicit permission to perform port knocking detection on the target system.
 *   Be aware of the potential for false positives and false negatives in port knocking detection.
 *   Monitor network traffic for any unusual activity that may indicate a security breach.
 *   Regularly update your vulnerability assessment tools and techniques to stay ahead of emerging threats.

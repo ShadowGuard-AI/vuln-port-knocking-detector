@@ -13,6 +13,7 @@ Detects potential port knocking implementations by sending a sequence of packets
 - `--timeout`: No description provided
 - `--delay`: No description provided
 - `--verbose`: No description provided
+- `--target-port`: The hidden or service port the knock sequence is meant to open. It is checked before and after the sequence, and whether it opened is the reported result.
 
 ## License
 Copyright (c) ShadowStrikeHQ
