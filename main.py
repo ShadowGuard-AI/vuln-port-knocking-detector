@@ -61,6 +61,9 @@ def knock_port(host, port, timeout=1.0):
         bool: True if the connection was successful, False otherwise.
     """
     try:
+        # AF_INET only, in both socket users in this file. An IPv6 only
+        # host fails every knock and every target port check, and those
+        # failures read exactly like closed ports below.
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
             sock.connect((host, port))
@@ -117,6 +120,9 @@ def main():
         logging.error("Invalid target port. Please provide an integer between 1 and 65535.")
         sys.exit(1)
 
+    # A second, smaller connect check instead of reusing knock_port: the
+    # verdict needs a plain open or closed answer, and every OSError,
+    # refused, timed out, or unresolvable, collapses to closed.
     def port_is_open(port):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -138,6 +144,9 @@ def main():
             logging.info(f"Knocking on port {port} ({i+1}/{len(ports)})...")
             accepted = knock_port(host, port, timeout)
             logging.info(f"Knock delivered to port {port} ({'connection accepted' if accepted else 'refused or timed out, knock still delivered'}).")
+            # The delay also follows the last knock, before the target
+            # port recheck. That pause gives a slow knock daemon a moment
+            # to act, and I do not trim it as wasted time.
             time.sleep(delay)
 
         logging.info(f"Knock sequence delivered to all {len(ports)} ports.")
@@ -153,6 +162,9 @@ def main():
         else:
             print(f"Knock sequence delivered to all {len(ports)} ports. No target port was supplied with --target-port, so whether a hidden port opened was not checked.")
 
+    # No verdict in this tool changes the exit code. Detection, a port
+    # that stayed closed, and an interruption all end at exit 0; only the
+    # printed line separates them, so a caller must read the output.
     except KeyboardInterrupt:
         logging.info("Port knocking detection interrupted by user.")
     except Exception as e:
